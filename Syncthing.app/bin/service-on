@@ -1,0 +1,108 @@
+#!/bin/sh
+# Start the Syncthing daemon, generating its config on first run.
+# Detached, so it keeps running after app.sh (and this script) exit.
+
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$BIN_DIR")"
+# shellcheck source=bin/common.sh
+. "$BIN_DIR/common.sh"
+
+ensure_dirs
+
+# A config save that was cut off — by a power loss, or by the card going
+# read-only — leaves a .syncthing.tmp.* behind. Syncthing is not running, so
+# nothing owns them; clear them out rather than letting them pile up.
+rm -f "$CONFIG_DIR"/.syncthing.tmp.* 2>/dev/null
+
+if ! card_writable; then
+    log "SD card is read-only — Syncthing cannot run"
+    exit 2
+fi
+
+touch "$ENABLED_FLAG"
+
+if is_running; then
+    exit 0
+fi
+
+if [ ! -x "$SYNCTHING" ]; then
+    # Extracting the zip on Windows drops the executable bit.
+    chmod +x "$SYNCTHING" 2>/dev/null
+fi
+if [ ! -x "$SYNCTHING" ]; then
+    log "syncthing binary missing or not executable: $SYNCTHING"
+    exit 1
+fi
+
+# First run: make a config and keys. Syncthing v2 configures no folders at
+# all out of the box, which is what we want — folders are the user's to add
+# from the web UI. --no-port-probing keeps the GUI on 8384 rather than
+# hunting for a free port.
+if [ ! -f "$CONFIG_FILE" ]; then
+    log "generating Syncthing configuration"
+    "$SYNCTHING" generate --no-port-probing \
+        --home="$CONFIG_DIR" >>"$LOG_DIR/Syncthing.generate.log" 2>&1
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log "failed to generate configuration"
+        exit 1
+    fi
+
+    # Open the web UI to the network, once, at creation. Doing this on every
+    # start (as some ports do) would stomp a listen address the user later
+    # changed in the web UI.
+    awk -v addr="$DEFAULT_GUI_ADDRESS" '
+        /<gui[ >]/ { ingui = 1 }
+        ingui && !done && /<address>/ {
+            sub(/<address>[^<]*<\/address>/, "<address>" addr "</address>")
+            done = 1
+        }
+        /<\/gui>/ { ingui = 0 }
+        { print }
+    ' "$CONFIG_FILE" >"$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    # Name this device for everyone it pairs with, rather than leaving it to
+    # whatever hostname the firmware happens to set.
+    awk -v nm="$DEVICE_NAME" '
+        !done && /<device / && /name="/ {
+            sub(/name="[^"]*"/, "name=\"" nm "\"")
+            done = 1
+        }
+        { print }
+    ' "$CONFIG_FILE" >"$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    log "GUI listen address set to $(gui_address), device name $DEVICE_NAME"
+fi
+
+# Relative folder paths in the config resolve against the working directory, so
+# anchor it at the card root rather than wherever we were launched from.
+cd "$SDCARD_PATH" 2>/dev/null || cd / || exit 1
+
+# Do this before the daemon starts, so its own local calls work too.
+ensure_loopback
+
+log "starting Syncthing"
+# --no-browser: there is no browser to open on the handheld.
+# --no-upgrade: Syncthing would otherwise download a new build over the one
+#   we ship in the app, on a device where that is not ours to do.
+#
+# The inner & backgrounds inside a subshell that then exits, orphaning the
+# daemon to init — it survives this script's parent without nohup or setsid.
+# stdin closed too, not just stdout and stderr: the daemon outlives every
+# process that starts it, and must hold none of their descriptors.
+if command -v setsid >/dev/null 2>&1; then
+    setsid "$SYNCTHING" serve --no-browser --no-upgrade --no-port-probing \
+        --home="$CONFIG_DIR" </dev/null >>"$LOG_FILE" 2>&1 &
+else
+    ( "$SYNCTHING" serve --no-browser --no-upgrade --no-port-probing \
+        --home="$CONFIG_DIR" </dev/null >>"$LOG_FILE" 2>&1 & ) &
+fi
+
+# Give it a moment to come up so the caller can report a real failure.
+count=0
+while [ "$count" -lt 10 ]; do
+    is_running && exit 0
+    count=$((count + 1))
+    sleep 1
+done
+
+log "Syncthing did not start within 10s"
+exit 1

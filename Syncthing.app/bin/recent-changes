@@ -1,0 +1,55 @@
+#!/bin/sh
+# Print the file changes Syncthing has seen, newest first — the same list the
+# web UI shows under "Recent Changes", from the same endpoint it uses.
+#
+#   recent-changes [FILE]   write to FILE, or to stdout when no path is given
+#
+# The event log lives in the daemon's memory, so it starts empty on every
+# start: an empty list means nothing has happened since Syncthing came up, not
+# that nothing ever has.
+
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$BIN_DIR")"
+# shellcheck source=bin/common.sh
+. "$BIN_DIR/common.sh"
+
+[ -n "$1" ] && exec >"$1"
+
+is_running || { log "recent-changes: Syncthing is not running"; exit 1; }
+
+RAW="$PAK_RUN_DIR/syncthing-pak-events.json"
+if ! http_get "/rest/events/disk?limit=25" "$RAW"; then
+    log "recent-changes: could not read the event log"
+    rm -f "$RAW"
+    exit 1
+fi
+
+# The response is indented JSON, one field per line, so it reads without a JSON
+# parser. Per event the keys arrive in a fixed order — time, then type, then
+# the data block — and `path` is last of the three we want, which makes it the
+# line that completes a record. The events come back oldest-first; print them
+# in reverse so the newest change is the first thing on screen.
+awk '
+    /"time": "/ {
+        t = $0; sub(/.*"time": "/, "", t); sub(/".*/, "", t)
+        stamp = substr(t, index(t, "T") + 1, 5)
+        next
+    }
+    /"type": "LocalChangeDetected"/  { kind = "Local";  next }
+    /"type": "RemoteChangeDetected"/ { kind = "Remote"; next }
+    /"action": "/ {
+        action = $0; sub(/.*"action": "/, "", action); sub(/".*/, "", action)
+        next
+    }
+    /"path": "/ {
+        if (kind == "") next
+        path = $0; sub(/.*"path": "/, "", path); sub(/".*/, "", path)
+        n++
+        line[n] = sprintf("%s  %-6s %-8s %s", stamp, kind, action, path)
+        kind = ""
+    }
+    END { for (i = n; i >= 1; i--) print line[i] }
+' "$RAW"
+
+rm -f "$RAW"
+exit 0

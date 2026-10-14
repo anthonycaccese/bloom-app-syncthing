@@ -1,0 +1,5 @@
+#!/bin/sh
+echo "CONFIRM: $1" >> "$TRANSCRIPT"
+resp="$(head -n 1 "$QUEUE")"
+tail -n +2 "$QUEUE" > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"
+[ "$resp" = "YES" ]

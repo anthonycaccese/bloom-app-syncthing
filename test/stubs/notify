@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "NOTIFY: $1" >> "$TRANSCRIPT"
