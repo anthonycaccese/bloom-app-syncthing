@@ -1,0 +1,29 @@
+#!/bin/sh
+# Stop the Syncthing daemon.
+#
+#   service-off              the user turned it off — clear the intent flag
+#   service-off --keep-flag  Wi-Fi went away — stop, but remember they want it
+
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$BIN_DIR")"
+# shellcheck source=bin/common.sh
+. "$BIN_DIR/common.sh"
+
+[ "$1" = "--keep-flag" ] || rm -f "$ENABLED_FLAG"
+
+is_running || exit 0
+
+log "stopping Syncthing"
+killall syncthing >/dev/null 2>&1
+
+count=0
+while [ "$count" -lt 10 ]; do
+    is_running || exit 0
+    count=$((count + 1))
+    sleep 1
+done
+
+killall -9 syncthing >/dev/null 2>&1
+sleep 1
+is_running && exit 1
+exit 0

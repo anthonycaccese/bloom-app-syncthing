@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build app
+        run: make release
+
+      - name: Check archive contents
+        run: |
+          cd dist
+          unzip -l Syncthing.app.zip | grep -q 'Syncthing.app/app.sh'
+          unzip -l Syncthing.app.zip | grep -q 'Syncthing.app/bin/arm64/syncthing'
+          file Syncthing.app/bin/arm64/syncthing | grep -q 'ARM aarch64'
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/Syncthing.app.zip
+          generate_release_notes: true
+          body: |
+            Unzip and copy `Syncthing.app` into `_system/apps/` on your SD card.

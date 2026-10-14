@@ -1,0 +1,16 @@
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Bloom App: Syncthing #
+######################
+dist/
+Syncthing.app/bin/arm64/
+Syncthing.app/certs/
+test/.cache/

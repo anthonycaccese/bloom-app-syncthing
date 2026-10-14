@@ -1,0 +1,57 @@
+#!/bin/sh
+# Keep Syncthing running exactly while Wi-Fi is up.
+#
+# Bloom runs $CONFIG_PATH/post.sh detached once the menu is up; our marked
+# line in there launches this. It is also started directly by app.sh when the
+# user turns "Start at boot" on, so the Wi-Fi gating applies straight away
+# rather than only after the next reboot.
+#
+# It starts Syncthing when Wi-Fi comes up and stops it when Wi-Fi drops, so a
+# user who connects Wi-Fi later doesn't have to come back into the app.
+
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$BIN_DIR")"
+# shellcheck source=bin/common.sh
+. "$BIN_DIR/common.sh"
+
+POLL_SECONDS="${SYNCTHING_POLL_SECONDS:-15}"
+
+ensure_dirs
+
+# One watcher at a time. A pid in the file is only believed if that process is
+# really a watcher — pids get reused across reboots.
+if [ -f "$WATCHER_PIDFILE" ]; then
+    old="$(cat "$WATCHER_PIDFILE" 2>/dev/null)"
+    if [ -n "$old" ] && [ "$old" != "$$" ] &&
+        tr '\0' ' ' <"/proc/$old/cmdline" 2>/dev/null | grep -q wifi-watch; then
+        exit 0
+    fi
+fi
+echo "$$" >"$WATCHER_PIDFILE"
+
+cleanup() {
+    [ "$(cat "$WATCHER_PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$WATCHER_PIDFILE"
+    exit 0
+}
+trap cleanup EXIT INT TERM HUP QUIT
+
+log "wifi-watch started (pid $$)"
+
+while true; do
+    # "Start at boot" was turned off — our reason for existing is gone.
+    boot_enabled || { log "wifi-watch stopping: start at boot is off"; cleanup; }
+
+    if is_enabled && wifi_up; then
+        is_running || {
+            log "wifi-watch: Wi-Fi is up, starting Syncthing"
+            "$BIN_DIR/service-on" >/dev/null 2>&1
+        }
+    else
+        is_running && {
+            log "wifi-watch: Wi-Fi is down or Syncthing disabled, stopping"
+            "$BIN_DIR/service-off" --keep-flag >/dev/null 2>&1
+        }
+    fi
+
+    sleep "$POLL_SECONDS"
+done

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Ask a running Syncthing to rescan every folder now, instead of waiting for
+# its scan interval. This is what "Rescan All" does in the web UI.
+
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$BIN_DIR")"
+# shellcheck source=bin/common.sh
+. "$BIN_DIR/common.sh"
+
+is_running || { log "sync-now: Syncthing is not running"; exit 1; }
+
+if http_post "/rest/db/scan"; then
+    log "sync-now: rescan requested"
+    exit 0
+fi
+
+log "sync-now: rescan request failed"
+exit 1

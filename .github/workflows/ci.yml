@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Bloom runs BusyBox ash, so a bashism is a runtime failure on device.
+      - name: Lint (POSIX sh)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          make lint
+
+      - name: Test
+        run: make test
+
+      - name: Build app
+        run: make release
+
+      - name: Check archive contents
+        run: |
+          cd dist
+          unzip -l Syncthing.app.zip
+          unzip -l Syncthing.app.zip | grep -q 'Syncthing.app/app.sh'
+          unzip -l Syncthing.app.zip | grep -q 'Syncthing.app/bin/arm64/syncthing'
+          unzip -l Syncthing.app.zip | grep -q 'Syncthing.app/certs/ca-certificates.crt'
+          file Syncthing.app/bin/arm64/syncthing | grep -q 'ARM aarch64'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Syncthing.app
+          path: dist/Syncthing.app.zip

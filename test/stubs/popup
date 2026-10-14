@@ -1,0 +1,3 @@
+#!/bin/sh
+verb="$1"; shift
+exec "$verb" "$@"

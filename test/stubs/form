@@ -1,0 +1,7 @@
+#!/bin/sh
+{ echo "--- form ---"; for a in "$@"; do echo "  | $a"; done; } >> "$TRANSCRIPT"
+resp="$(head -n 1 "$QUEUE")"
+tail -n +2 "$QUEUE" > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"
+[ -z "$resp" ] && exit 1
+[ "$resp" = "CANCEL" ] && exit 1
+printf '%s\n' "$resp" | tr '~' '\n'
